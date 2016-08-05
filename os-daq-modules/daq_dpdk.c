@@ -12,7 +12,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/poll.h>
-
+#include <pthread.h>
 #include <daq_api.h>
 #include <sfbpf.h>
 #include <sfbpf_dlt.h>
@@ -64,7 +64,12 @@ typedef struct _dpdk_instance
     //
     struct rte_mbuf *bufs[BURST_SIZE];
     struct rte_mempool * mp;
-
+    volatile int break_loop;
+    DAQ_Stats_t stats;
+    struct sfbpf_program fcode;
+    DAQ_State state;
+    char *filter;
+    char errbuf[256];
 } DPDKInstance;
 
 typedef struct _dpdk_context
@@ -74,23 +79,42 @@ typedef struct _dpdk_context
     int snaplen;
     int timeout;
     int debug;
+    int threadNum;//the num of threads use this content. If num ==0, then free the dpdkc.
+    pthread_t  *portMap;//portmap[port] = threadId;
     DPDKInstance *instances;
+    DPDKInstance **insMap;
     struct rte_mempool * mp;
-    uint32_t intf_count;
+    uint32_t intf_count;//the num of interface.
     struct sfbpf_program fcode;
     volatile int break_loop;
     DAQ_Stats_t stats;
     DAQ_State state;
+    
     char errbuf[256];
 } DPDK_Context_t;
-
+DPDK_Context_t * local_ctx = NULL;
+static int isInit = -1;
+pthread_mutex_t mutex;
 //todo
+
+#define FIND_IDX() do { \
+        pthread_t tid = pthread_self(); \
+        idx = -1; \
+        for (int i =0;i<dpdkc->intf_count;i++ ){ \
+            if(tid == dpdkc->portMap[i]){ \
+                idx = i; \
+                break; \
+            } \
+        } \
+} while(0) 
+
 static void destroy_instance(DPDKInstance *instance)
 {
     if (instance)
     {
         for (int i =instance->start;i<instance->end;i++)
             rte_pktmbuf_free(instance->bufs[i]);
+        //here may need change.
         rte_eth_dev_stop(instance->port);
         free(instance);
     }
@@ -102,7 +126,18 @@ static int dpdk_close(DPDK_Context_t *dpdkc)
 
     if (!dpdkc)
         return -1;
-
+    int idx = -1;
+    FIND_IDX();
+    if (idx == -1){
+        return 0;
+    }
+    dpdkc->portMap[idx] = -1;
+    pthread_mutex_lock(&mutex);
+    dpdkc->threadNum--;
+    if(dpdkc->threadNum >0){
+        pthread_mutex_unlock(&mutex);
+        return 0;
+    }
     /* Free all of the device instances. */
     while ((instance = dpdkc->instances) != NULL)
     {
@@ -112,13 +147,14 @@ static int dpdk_close(DPDK_Context_t *dpdkc)
             printf("dpdk instance %d (%d) tx %d pkts on TX while forwarding.\n",
                     instance->port, instance->index, instance->tx_num);
         }
+        sfbpf_freecode(&instance->fcode);
         destroy_instance(instance);
     }
 
     sfbpf_freecode(&dpdkc->fcode);
 
     dpdkc->state = DAQ_STATE_STOPPED;
-
+    pthread_mutex_unlock(&mutex);
     return 0;
 }
 //here to init a port.
@@ -127,7 +163,6 @@ static DPDKInstance *create_instance(const char *device, DPDKInstance *parent, c
     DPDKInstance *instance;
     int port;
     static int index = 0;
-    printf("1.\n");
     instance = calloc(1, sizeof(DPDKInstance));
     if (!instance)
     {
@@ -149,7 +184,6 @@ static DPDKInstance *create_instance(const char *device, DPDKInstance *parent, c
     /* Initialize the dpdk request object. */
     instance -> port = port;
     instance -> queue_size = 1;//the queue size need to change.
-    printf("2.\n");
     return instance;
 err:
     destroy_instance(instance);
@@ -181,6 +215,20 @@ static int create_bridge(DPDK_Context_t *dpdkc, const int port1, const int port2
 static int start_instance(DPDK_Context_t *dpdkc, DPDKInstance *instance)
 {
     printf("%s:%d.\n",__FUNCTION__,__LINE__);
+    /*
+    int idx = -1;
+    pthread_t tid = pthread_self();
+    for (int i =0;i<dpdkc->intf_count;i++ ){
+        if(tid == dpdkc->portMap[i]){
+            idx = i;
+            break;
+        }
+    }
+    if (idx == -1){
+        DPE(dpdkc->errbuf, "%s: Couldn't start device for thread %d\n", __FUNCTION__, tid);
+        return DAQ_ERROR;
+    }
+    instance = insMap[i];*/
     struct rte_mempool * mp = dpdkc->mp;
     int queue = instance -> queue_size;
     //instance -> queue_size = 4;
@@ -236,15 +284,43 @@ static int start_instance(DPDK_Context_t *dpdkc, DPDKInstance *instance)
 static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, char *errbuf, size_t errlen)
 {
     DPDK_Context_t *dpdkc;
+
     DPDKInstance *instance;
     DAQ_Dict *entry;
     char intf[IFNAMSIZ];
     uint32_t num_intfs = 0;
     size_t len;
     int port1,port2,ports;
-    char *name1, *name2, *dev;
+    char  *dev;
+    static int count  =0;
     int rval = DAQ_ERROR,ret;
-    printf("In NachtZ's edition dpdk module of daq.\n");
+    if(isInit == -1){
+        pthread_mutex_init(&mutex,NULL);
+        isInit = 0;
+    }
+    pthread_mutex_lock(&mutex);
+    if(isInit == 1){
+        int idx = -1;
+        dpdkc = local_ctx;
+        for(int i =0;i<dpdkc->intf_count;i++){
+            if (dpdkc->portMap[i] == -1){
+                idx = i;
+                break;
+            }
+        }
+        if (idx == -1){
+            snprintf(errbuf, errlen, "%s: Couldn't found free port!", __FUNCTION__);
+            pthread_mutex_unlock(&mutex);
+            return DAQ_ERROR_NODEV;
+        }
+        dpdkc->portMap[idx] = pthread_self();
+        dpdkc->threadNum =1;
+        *ctxt_ptr = local_ctx;
+        
+        pthread_mutex_unlock(&mutex);
+        return DAQ_SUCCESS;
+    }
+    printf("In NachtZ's edition dpdk module of daq:%d.\n",count ++);
     dpdkc = calloc(1, sizeof(DPDK_Context_t));
     if (!dpdkc)
     {
@@ -254,7 +330,6 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     }
 
     dpdkc->device = strdup(config->name);
-    printf("%s:%d.\n",__FUNCTION__,__LINE__);
     if (!dpdkc->device)
     {
         snprintf(errbuf, errlen, "%s: Couldn't allocate memory for the device string!", __FUNCTION__);
@@ -266,7 +341,6 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     dpdkc->timeout = (config->timeout > 0) ? (int) config->timeout : -1;
     //here need to be edit.
     int argc = 3;
-    printf("%s:%d.\n",__FUNCTION__,__LINE__);
     char * argv[] = {"dpdk","-c","3"};
     ret = rte_eal_init(argc,argv);
     if(ret <0){
@@ -274,15 +348,13 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
         rval = DAQ_ERROR_INVAL;
         goto err;
     }
-    printf("%s:%d.\n",__FUNCTION__,__LINE__);
+
     ports = rte_eth_dev_count();
     if(ports <0){
         snprintf(errbuf, errlen, "%s: No ports found!", __FUNCTION__);
         rval = DAQ_ERROR_NODEV;
         goto err;
     }
-    printf("%s:%d.\n",__FUNCTION__,__LINE__);
-    printf("%s:%d.\n",__FUNCTION__,__LINE__);
     dpdkc -> mp = rte_pktmbuf_pool_create("MBUF_POOL",
 		NUM_MBUFS * ports, MBUF_CACHE_SIZE, 0,
 		RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
@@ -298,7 +370,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
         snprintf(errbuf, errlen, "%s: Invalid interface specification: '%s'!", __FUNCTION__, dpdkc->device);
         goto err;
     }
-    printf("%s:%d.\n",__FUNCTION__,__LINE__);
+
     while (*dev != '\0')
     {
         len = strcspn(dev, ":");
@@ -307,7 +379,6 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
             snprintf(errbuf, errlen, "%s: Interface name too long! (%zu)", __FUNCTION__, len);
             goto err;
         }
-        printf("%s:%d.\n",__FUNCTION__,__LINE__);
         if (len != 0)
         {
             dpdkc->intf_count++;
@@ -348,11 +419,9 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
         }
         else
             len = 1;
-            printf("%s:%d.\n",__FUNCTION__,__LINE__);
         dev += len;
         printf("\nNachtZ's dpdk module for daq init done!\n\n");
     }
-    printf("%s:%d.\n",__FUNCTION__,__LINE__);
     /* If there are any leftover unbridged interfaces and we're not in Passive mode, error out. */
     if (!dpdkc->instances || (config->mode != DAQ_MODE_PASSIVE && num_intfs != 0))
     {
@@ -360,7 +429,26 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
                     __FUNCTION__, dpdkc->device);
         goto err;
     }
-
+    //to init the thread map and instances map,  then put this thread into the thread map.
+    if(dpdkc->intf_count >0){
+        dpdkc->insMap = calloc(1,dpdkc->intf_count * sizeof(DPDKInstance *));
+        dpdkc->portMap = calloc(1,dpdkc->intf_count * sizeof(pthread_t));
+        if(dpdkc->insMap == NULL || dpdkc->portMap == NULL){
+        snprintf(errbuf, errlen, "%s: Can't calloc the insMap's mem!",
+                    __FUNCTION__ );
+        goto err;
+        }
+        instance = dpdkc->instances;
+        for (int i =0;instance!= NULL&& i< dpdkc->intf_count;i++){
+            dpdkc->insMap[i] = instance;
+            instance = instance->next;
+            dpdkc->portMap[i] = -1;
+        }
+        dpdkc->portMap[0] = pthread_self();//get the id;
+        dpdkc->threadNum = 1;
+    }
+    
+    
     /* Initialize other default configuration values. */
     dpdkc->debug = 0;
 
@@ -374,6 +462,9 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     dpdkc->state = DAQ_STATE_INITIALIZED;
 
     *ctxt_ptr = dpdkc;
+    local_ctx = dpdkc;
+    isInit = 1;
+    pthread_mutex_unlock(&mutex);
     return DAQ_SUCCESS;
 
 err:
@@ -384,6 +475,7 @@ err:
             free(dpdkc->device);
         free(dpdkc);
     }
+    pthread_mutex_unlock(&mutex);
     return rval;
 }
 
@@ -391,44 +483,49 @@ static int dpdk_daq_set_filter(void *handle, const char *filter)
 {
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
     struct sfbpf_program fcode;
+    int idx = -1;
+    FIND_IDX();
+    if(idx == -1){
+        DPE(dpdkc->errbuf, "%s: Couldn't find the port!", __FUNCTION__);
+        return DAQ_ERROR;
+    }
+    if (dpdkc->insMap[idx]->filter)
+        free(dpdkc->insMap[idx]->filter);
 
-    if (dpdkc->filter)
-        free(dpdkc->filter);
-
-    dpdkc->filter = strdup(filter);
-    if (!dpdkc->filter)
+    dpdkc->insMap[idx]->filter = strdup(filter);
+    if (!dpdkc->insMap[idx]->filter)
     {
-        DPE(dpdkc->errbuf, "%s: Couldn't allocate memory for the filter string!", __FUNCTION__);
+        DPE(dpdkc->insMap[idx]->errbuf, "%s: Couldn't allocate memory for the filter string!", __FUNCTION__);
         return DAQ_ERROR;
     }
 
-    if (sfbpf_compile(dpdkc->snaplen, DLT_EN10MB, &fcode, dpdkc->filter, 1, 0) < 0)
+    if (sfbpf_compile(dpdkc->snaplen, DLT_EN10MB, &fcode, dpdkc->insMap[idx]->filter, 1, 0) < 0)
     {
-        DPE(dpdkc->errbuf, "%s: BPF state machine compilation failed!", __FUNCTION__);
+        DPE(dpdkc->insMap[idx]->errbuf, "%s: BPF state machine compilation failed!", __FUNCTION__);
         return DAQ_ERROR;
     }
 
-    sfbpf_freecode(&dpdkc->fcode);
-    dpdkc->fcode.bf_len = fcode.bf_len;
-    dpdkc->fcode.bf_insns = fcode.bf_insns;
+    sfbpf_freecode(&dpdkc->insMap[idx]->filter);
+    dpdkc->insMap[idx]->fcode.bf_len = fcode.bf_len;
+    dpdkc->insMap[idx]->fcode.bf_insns = fcode.bf_insns;
 
     return DAQ_SUCCESS;
 }
 
 static int dpdk_daq_start(void *handle)
 {
+    
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
     DPDKInstance *instance;
-
-    for (instance = dpdkc->instances; instance; instance = instance->next)
-    {
-        if (start_instance(dpdkc, instance) != DAQ_SUCCESS)
+    int idx = -1;
+    FIND_IDX();
+    instance = dpdkc->insMap[idx];
+    if (start_instance(dpdkc, instance) != DAQ_SUCCESS)
             return DAQ_ERROR;
-    }
+//todo: change the dpdkc->state to instance->state
+    memset(&dpdkc->insMap[idx]->stats, 0, sizeof(DAQ_Stats_t));;
 
-    memset(&dpdkc->stats, 0, sizeof(DAQ_Stats_t));;
-
-    dpdkc->state = DAQ_STATE_STARTED;
+    dpdkc->insMap[idx]->state = DAQ_STATE_STARTED;
 
     return DAQ_SUCCESS;
 }
@@ -449,7 +546,13 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
     //struct dpdk_ring *rx_ring, *tx_ring;
     //struct dpdk_slot *rx_slot, *tx_slot;
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
-    DPDKInstance *instance, *peer;
+    int idx = -1;
+    FIND_IDX();
+    if (idx == -1){
+        return 0;
+    }
+    
+    DPDKInstance *instance = dpdkc->insMap[idx], *peer;
     DAQ_PktHdr_t daqhdr;
     DAQ_Verdict verdict;
     const uint8_t *data;
@@ -464,15 +567,12 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
     {
         got_one = 0;
         ignored_one = 0;
-
-        for (instance = dpdkc->instances; instance; instance = instance->next)
-        {
       //      start_rx_ring = instance->cur_rx_ring;
 
                 /* Has breakloop() been called? */
-            if (dpdkc->break_loop)
+            if (instance->break_loop)
             {
-                dpdkc->break_loop = 0;
+                instance->break_loop = 0;
                 return 0;
             }
             peer = instance -> peer;
@@ -515,11 +615,11 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
                     verdict = DAQ_VERDICT_PASS;
                     data = rte_pktmbuf_mtod(bufs[i],void *);
                     len = rte_pktmbuf_data_len(bufs[i]);
-                    dpdkc->stats.hw_packets_received ++;
-                    if (dpdkc->fcode.bf_insns && sfbpf_filter(dpdkc->fcode.bf_insns, data, len, len) == 0)
+                    instance->stats.hw_packets_received ++;
+                    if (instance->fcode.bf_insns && sfbpf_filter(instance->fcode.bf_insns, data, len, len) == 0)
                     {
                         ignored_one = 1;
-                        dpdkc->stats.packets_filtered++;
+                        instance->stats.packets_filtered++;
                         goto send_packet;
                     }
                     got_one = 1;
@@ -540,10 +640,10 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
                         verdict = callback(user, &daqhdr, data);
                         if (verdict >= MAX_DAQ_VERDICT)
                             verdict = DAQ_VERDICT_PASS;
-                        dpdkc->stats.verdicts[verdict]++;
+                        instance->stats.verdicts[verdict]++;
                         verdict = verdict_translation_table[verdict];
                     }
-                    dpdkc->stats.packets_received++;
+                    instance->stats.packets_received++;
                     c++;
 send_packet:
                     if (verdict == DAQ_VERDICT_PASS && instance->peer)
@@ -562,7 +662,7 @@ send_packet:
                     continue;
             
 poll:
-                for (queue == 0;burst_size !=0 && queue < peer->queue_size;queue ++){
+                for (queue = 0;burst_size !=0 && queue < peer->queue_size;queue ++){
                     const uint16_t nb_tx = rte_eth_tx_burst(peer->port,queue,&peer->bufs[peer->start],burst_size);
                     if (unlikely(nb_tx ==0))
                         continue;
@@ -575,7 +675,7 @@ poll:
                     peer->end = 0;
                 }
             }
-        }
+        
         if (!got_one && !ignored_one && !sent_one)
         {
             struct timeval now;
@@ -597,6 +697,7 @@ static int dpdk_daq_inject(void *handle, const DAQ_PktHdr_t *hdr,
                              const uint8_t *packet_data, uint32_t len,
                              int reverse)
 {
+    //this function do not edit. As it look for instance according to it's own mark.
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
     DPDKInstance *instance;
     struct rte_mbuf * m = NULL;
@@ -645,7 +746,12 @@ static int dpdk_daq_breakloop(void *handle)
 {
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
 
-    dpdkc->break_loop = 1;
+    int idx = -1;
+    FIND_IDX();
+    if (idx == -1){
+        return 0;
+    }
+    dpdkc->insMap[idx]->break_loop = 1;
 
     return DAQ_SUCCESS;
 }
@@ -664,6 +770,9 @@ static void dpdk_daq_shutdown(void *handle)
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
 
     dpdk_close(dpdkc);
+    if(dpdkc->threadNum != 0){
+        return ;
+    }
     if (dpdkc->device)
         free(dpdkc->device);
     if (dpdkc->filter)
@@ -674,15 +783,17 @@ static void dpdk_daq_shutdown(void *handle)
 static DAQ_State dpdk_daq_check_status(void *handle)
 {
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
-
-	return dpdkc->state;
+    int idx = -1;
+    FIND_IDX();
+	return dpdkc->insMap[idx]->state;
 }
 
 static int dpdk_daq_get_stats(void *handle, DAQ_Stats_t * stats)
 {
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
-
-    memcpy(stats, &dpdkc->stats, sizeof(DAQ_Stats_t));
+    int idx = -1;
+    FIND_IDX();
+    memcpy(stats, &dpdkc->insMap[idx]->stats, sizeof(DAQ_Stats_t));
 
     return DAQ_SUCCESS;
 }
@@ -690,8 +801,9 @@ static int dpdk_daq_get_stats(void *handle, DAQ_Stats_t * stats)
 static void dpdk_daq_reset_stats(void *handle)
 {
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
-
-    memset(&dpdkc->stats, 0, sizeof(DAQ_Stats_t));;
+    int idx = -1;
+    FIND_IDX();
+    memset(&dpdkc->insMap[idx]->stats, 0, sizeof(DAQ_Stats_t));;
 }
 
 static int dpdk_daq_get_snaplen(void *handle)
@@ -716,8 +828,9 @@ static int dpdk_daq_get_datalink_type(void *handle)
 static const char *dpdk_daq_get_errbuf(void *handle)
 {
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
-
-    return dpdkc->errbuf;
+    int idx = -1;
+    FIND_IDX();
+    return dpdkc->insMap[idx]->errbuf;
 }
 
 static void dpdk_daq_set_errbuf(void *handle, const char *string)
@@ -726,8 +839,9 @@ static void dpdk_daq_set_errbuf(void *handle, const char *string)
 
     if (!string)
         return;
-
-    DPE(dpdkc->errbuf, "%s", string);
+    int idx = -1;
+    FIND_IDX();
+    DPE(dpdkc->insMap[idx]->errbuf, "%s", string);
 }
 
 static int dpdk_daq_get_device_index(void *handle, const char *device)
