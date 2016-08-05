@@ -3,7 +3,7 @@
 This is a project about dpdk module for daq.  
 The DAQ version is v2.1.0. You can visit [Snort.org](https://snort.org/downloads/#snort-3.0) to download the origin version about daq and snort++.  
 The daq module is overwrite from the module `daq_netmap.c`. And I also refer to [btw616's project](https://github.com/btw616/daq-dpdk) and [his mail](https://sourceforge.net/p/snort/mailman/message/35162409/) for how to use the new daq module in snort.  
-The edition of the module is `0.1` now as it has just simplely made the snort can usr dpdk in single thread.
+The edition of the module is `0.1` now as it has just simplely made the snort can usr dpdk in single thread. If you run the snort with `-z 2`option, you will find the second thread will fialed when init daq.
 I want the module be multithreading at the end.
 
 
