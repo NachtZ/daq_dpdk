@@ -434,7 +434,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
         if (len != 0)
         {
             dpdkc->intf_count++;
-            if (dpdkc->intf_count >= ports)
+            if (dpdkc->intf_count > ports)
             {
                 snprintf(errbuf, errlen, "%s: Using more than %d interfaces is not supported!",
                             __FUNCTION__, ports);
@@ -522,6 +522,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     return DAQ_SUCCESS;
 
 err:
+    DBG("%s() in %d:Error :%s.\n",__FUNCTION__,__LINE__,errbuf);
     if (dpdkc)
     {
         dpdk_close(dpdkc);
