@@ -34,6 +34,8 @@
 #define MBUF_CACHE_SIZE 250
 #define BURST_SIZE 32
 
+#define MAX_ARGS 64
+
 #define DAQ_DPDK_VERSION  16.04
 
 /* Hi! I'm completely arbitrary! */
@@ -114,8 +116,21 @@ pthread_mutex_t mutex;
                 break; \
             } \
         } \
-        DBG("%s(),%d:idx %d.\n",__FUNCTION__,__LINE__,idx); \
+        DBG("%s(),%d:idx %d tid %d.\n",__FUNCTION__,__LINE__,idx,tid); \
 } while(0) 
+
+static int parse_args(char *inputstring, char **argv)
+{
+    char **ap;
+
+    for (ap = argv; (*ap = strsep(&inputstring, " \t")) != NULL;)
+    {
+        if (**ap != '\0')
+            if (++ap >= &argv[MAX_ARGS])
+                break;
+    }
+    return ap - argv;
+}
 
 static void destroy_instance(DPDKInstance *instance)
 {
@@ -302,6 +317,9 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     int port1,port2,ports;
     char  *dev;
     static int count  =0;
+    char *dpdk_args = NULL;
+    char argv0[] = "NachtZ";
+    char *argv[MAX_ARGS + 1];
     int rval = DAQ_ERROR,ret;
     if(isInit == -1){
         DBG("%s(),%d:Init mutex.\n",__FUNCTION__,__LINE__);
@@ -351,15 +369,38 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     dpdkc->snaplen = config->snaplen;
     dpdkc->timeout = (config->timeout > 0) ? (int) config->timeout : -1;
     //here need to be edit.
-    int argc = 3;
+    /*int argc = 3;
     char * argv[] = {"dpdk","-c","3"};
     ret = rte_eal_init(argc,argv);
     if(ret <0){
         snprintf(errbuf, errlen, "%s: EAL init failed!", __FUNCTION__);
         rval = DAQ_ERROR_INVAL;
         goto err;
+    }*/
+    for (entry = config->values; entry; entry = entry->next)
+    {
+        if (!strcmp(entry->key, "dpdk_args"))
+            dpdk_args = entry->value;
     }
 
+    if (!dpdk_args)
+    {
+        snprintf(errbuf, errlen, "%s: Missing EAL arguments!", __FUNCTION__);
+        rval = DAQ_ERROR_INVAL;
+        goto err;
+    }
+    argv[0] = argv0;
+    int argc = parse_args(dpdk_args, &argv[1]) + 1;
+    optind = 1;
+
+    ret = rte_eal_init(argc, argv);
+    if (ret < 0)
+    {
+        snprintf(errbuf, errlen, "%s: Invalid EAL arguments!\n", __FUNCTION__);
+        rval = DAQ_ERROR_INVAL;
+        goto err;
+    }  
+    
     ports = rte_eth_dev_count();
     if(ports <0){
         snprintf(errbuf, errlen, "%s: No ports found!", __FUNCTION__);
@@ -799,6 +840,7 @@ static void dpdk_daq_shutdown(void *handle)
     if (dpdkc->filter)
         free(dpdkc->filter);
     free(dpdkc);
+    isInit = 0;
 }
 
 static DAQ_State dpdk_daq_check_status(void *handle)
