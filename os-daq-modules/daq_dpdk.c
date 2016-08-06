@@ -45,6 +45,14 @@
 #define nm_ring_empty(r)        ((r)->avail == 0)
 #endif
 */
+
+#define DEBUG 1
+#if DEBUG 
+#define DBG(var, ...) printf(var, __VA_ARGS__)
+#else 
+#define DBG(var, ...) //printf(var, __VA_ARGS__)
+#endif
+
 typedef struct _dpdk_instance
 {
     struct _dpdk_instance *next;
@@ -100,13 +108,13 @@ pthread_mutex_t mutex;
 #define FIND_IDX() do { \
         pthread_t tid = pthread_self(); \
         idx = -1; \
-        for (int i =0;i<dpdkc->intf_count;i++ ){ \
+        for (uint8_t i =0;i<dpdkc->intf_count;i++ ){ \
             if(tid == dpdkc->portMap[i]){ \
                 idx = i; \
                 break; \
             } \
         } \
-        printf("%s(),%d:idx %d.\n",__FUNCTION__,__LINE__,idx); \
+        DBG("%s(),%d:idx %d.\n",__FUNCTION__,__LINE__,idx); \
 } while(0) 
 
 static void destroy_instance(DPDKInstance *instance)
@@ -215,7 +223,7 @@ static int create_bridge(DPDK_Context_t *dpdkc, const int port1, const int port2
 //start a port to get core.
 static int start_instance(DPDK_Context_t *dpdkc, DPDKInstance *instance)
 {
-    printf("%s:%d.\n",__FUNCTION__,__LINE__);
+    DBG("%s():%d.\n",__FUNCTION__,__LINE__);
     /*
     int idx = -1;
     pthread_t tid = pthread_self();
@@ -248,7 +256,7 @@ static int start_instance(DPDK_Context_t *dpdkc, DPDKInstance *instance)
 	};
     int port = instance -> port;
     if(port > rte_eth_dev_count()){
-        printf("%s:%d.\n",__FUNCTION__,__LINE__);
+        DBG("%s():%d.\n",__FUNCTION__,__LINE__);
         return DAQ_ERROR;
     }
     int retval = rte_eth_dev_configure(port,queue,queue,&port_conf);
@@ -296,12 +304,12 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     static int count  =0;
     int rval = DAQ_ERROR,ret;
     if(isInit == -1){
-        printf("Init mutex.\n");
+        DBG("%s(),%d:Init mutex.\n",__FUNCTION__,__LINE__);
         pthread_mutex_init(&mutex,NULL);
         isInit = 0;
     }
     pthread_mutex_lock(&mutex);
-    printf("Lock Mutex.\n");
+    DBG("%s(),%d:Lock Mutex.\n",__FUNCTION__,__LINE__);
     if(isInit == 1){
         int idx = -1;
         dpdkc = local_ctx;
@@ -323,7 +331,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
         pthread_mutex_unlock(&mutex);
         return DAQ_SUCCESS;
     }
-    printf("In NachtZ's edition dpdk module of daq:%d.\n",count ++);
+    DBG("In NachtZ's edition dpdk module of daq:%d.\n",count ++);
     dpdkc = calloc(1, sizeof(DPDK_Context_t));
     if (!dpdkc)
     {
@@ -446,7 +454,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
             instance->state = DAQ_STATE_INITIALIZED;
             instance = instance->next;
             dpdkc->portMap[i] = -1;
-            printf("%s() in %d: isnMap %d is %d.\n",__FUNCTION__,__LINE__,i,dpdkc->insMap[i]->port);
+            DBG("%s() in %d: isnMap %d is %d.\n",__FUNCTION__,__LINE__,i,dpdkc->insMap[i]->port);
         }
         dpdkc->portMap[0] = pthread_self();//get the id;
         dpdkc->threadNum = 1;
@@ -468,7 +476,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     *ctxt_ptr = dpdkc;
     local_ctx = dpdkc;
     isInit = 1;
-    printf("%s() in %d:unluck, T.\n",__FUNCTION__,__LINE__);
+    DBG("%s() in %d:unluck, T.\n",__FUNCTION__,__LINE__);
     pthread_mutex_unlock(&mutex);
     return DAQ_SUCCESS;
 
@@ -480,7 +488,7 @@ err:
             free(dpdkc->device);
         free(dpdkc);
     }
-    printf("%s() in %d:unluck, F.\n",__FUNCTION__,__LINE__);
+    DBG("%s() in %d:unluck, F.\n",__FUNCTION__,__LINE__);
     pthread_mutex_unlock(&mutex);
     return rval;
 }
@@ -520,13 +528,13 @@ static int dpdk_daq_set_filter(void *handle, const char *filter)
 
 static int dpdk_daq_start(void *handle)
 {
-    printf("%s() in line %d.\n",__FUNCTION__,__LINE__);
+    DBG("%s() in line %d.\n",__FUNCTION__,__LINE__);
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
     DPDKInstance *instance;
     int idx = -1;
     FIND_IDX();
     if(idx == -1){
-        printf("%s() in line %d: 404.\n",__FUNCTION__,__LINE__);
+        DBG("%s() in line %d: 404.\n",__FUNCTION__,__LINE__);
         return DAQ_ERROR;
     }
     instance = dpdkc->insMap[idx];
