@@ -106,6 +106,7 @@ pthread_mutex_t mutex;
                 break; \
             } \
         } \
+        printf("%s(),%d:idx %d.\n",__FUNCTION__,__LINE__,idx); \
 } while(0) 
 
 static void destroy_instance(DPDKInstance *instance)
@@ -295,10 +296,12 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     static int count  =0;
     int rval = DAQ_ERROR,ret;
     if(isInit == -1){
+        printf("Init mutex.\n");
         pthread_mutex_init(&mutex,NULL);
         isInit = 0;
     }
     pthread_mutex_lock(&mutex);
+    printf("Lock Mutex.\n");
     if(isInit == 1){
         int idx = -1;
         dpdkc = local_ctx;
@@ -420,7 +423,6 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
         else
             len = 1;
         dev += len;
-        printf("\nNachtZ's dpdk module for daq init done!\n\n");
     }
     /* If there are any leftover unbridged interfaces and we're not in Passive mode, error out. */
     if (!dpdkc->instances || (config->mode != DAQ_MODE_PASSIVE && num_intfs != 0))
@@ -441,8 +443,10 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
         instance = dpdkc->instances;
         for (int i =0;instance!= NULL&& i< dpdkc->intf_count;i++){
             dpdkc->insMap[i] = instance;
+            instance->state = DAQ_STATE_INITIALIZED;
             instance = instance->next;
             dpdkc->portMap[i] = -1;
+            printf("%s() in %d: isnMap %d is %d.\n",__FUNCTION__,__LINE__,i,dpdkc->insMap[i]->port);
         }
         dpdkc->portMap[0] = pthread_self();//get the id;
         dpdkc->threadNum = 1;
@@ -464,6 +468,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     *ctxt_ptr = dpdkc;
     local_ctx = dpdkc;
     isInit = 1;
+    printf("%s() in %d:unluck, T.\n",__FUNCTION__,__LINE__);
     pthread_mutex_unlock(&mutex);
     return DAQ_SUCCESS;
 
@@ -475,6 +480,7 @@ err:
             free(dpdkc->device);
         free(dpdkc);
     }
+    printf("%s() in %d:unluck, F.\n",__FUNCTION__,__LINE__);
     pthread_mutex_unlock(&mutex);
     return rval;
 }
@@ -514,18 +520,22 @@ static int dpdk_daq_set_filter(void *handle, const char *filter)
 
 static int dpdk_daq_start(void *handle)
 {
-    
+    printf("%s() in line %d.\n",__FUNCTION__,__LINE__);
     DPDK_Context_t *dpdkc = (DPDK_Context_t *) handle;
     DPDKInstance *instance;
     int idx = -1;
     FIND_IDX();
+    if(idx == -1){
+        printf("%s() in line %d: 404.\n",__FUNCTION__,__LINE__);
+        return DAQ_ERROR;
+    }
     instance = dpdkc->insMap[idx];
     if (start_instance(dpdkc, instance) != DAQ_SUCCESS)
             return DAQ_ERROR;
 //todo: change the dpdkc->state to instance->state
-    memset(&dpdkc->insMap[idx]->stats, 0, sizeof(DAQ_Stats_t));;
+    memset(&instance->stats, 0, sizeof(DAQ_Stats_t));;
 
-    dpdkc->insMap[idx]->state = DAQ_STATE_STARTED;
+    instance->state = DAQ_STATE_STARTED;
 
     return DAQ_SUCCESS;
 }
@@ -749,7 +759,10 @@ static int dpdk_daq_breakloop(void *handle)
     int idx = -1;
     FIND_IDX();
     if (idx == -1){
-        return 0;
+        for (int i =0;i< dpdkc->intf_count;i++){
+            dpdkc->insMap[i]->break_loop = 1;
+        }
+        return DAQ_SUCCESS;
     }
     dpdkc->insMap[idx]->break_loop = 1;
 
