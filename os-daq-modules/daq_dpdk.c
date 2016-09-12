@@ -23,6 +23,7 @@
 #include <rte_config.h>
 #include <rte_eal.h>
 #include <rte_ethdev.h>
+#include <rte_errno.h>
 
 #define RX_RING_SIZE 1024
 #define TX_RING_SIZE 1024
@@ -349,7 +350,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
         pthread_mutex_unlock(&mutex);
         return DAQ_SUCCESS;
     }
-    DBG("In NachtZ's edition dpdk module of daq:%d.\n",count ++);
+    DBG("In NachtZ's 9.12 edition dpdk module of daq:%d.\n",count ++);
     dpdkc = calloc(1, sizeof(DPDK_Context_t));
     if (!dpdkc)
     {
@@ -402,16 +403,18 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     }  
     
     ports = rte_eth_dev_count();
-    if(ports <0){
+    if(ports <=0){
         snprintf(errbuf, errlen, "%s: No ports found!", __FUNCTION__);
         rval = DAQ_ERROR_NODEV;
         goto err;
     }
+
     dpdkc -> mp = rte_pktmbuf_pool_create("MBUF_POOL",
-		NUM_MBUFS * ports, MBUF_CACHE_SIZE, 0,
+		NUM_MBUFS*ports, MBUF_CACHE_SIZE, 0,
 		RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
     if(dpdkc ->mp == NULL){
-        snprintf(errbuf, errlen, "%s: No Mem reserved", __FUNCTION__);
+
+        snprintf(errbuf, errlen, "%s: No Mem reserved, DPDK errno is %s.", __FUNCTION__,rte_strerror(rte_errno));
         rval = DAQ_ERROR_NOMEM;
         goto err;
     }
@@ -664,13 +667,15 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
                     goto send_packet;
                 }*/
             for(queue = 0;queue < instance -> queue_size;queue ++){
-                gettimeofday(&ts,NULL);
+                gettimeofday(&ts,NULL);//one slow point
                 if(cnt <=0 || BURST_SIZE + c <= cnt){
                     burst_size = BURST_SIZE;
                 }else{
                     burst_size =  cnt - c;
                 }
                 uint16_t nb_rx = rte_eth_rx_burst(instance->port,queue,bufs,burst_size);
+                if (unlikely(nb_rx == 0))
+                    continue;
                 for(i =0;i<nb_rx;++i){
                     verdict = DAQ_VERDICT_PASS;
                     data = rte_pktmbuf_mtod(bufs[i],void *);
@@ -695,8 +700,7 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
                     daqhdr.priv_ptr = NULL;
                     daqhdr.address_space_id = 0;
 
-                    if (callback)
-                    {
+                    if (callback){
                         verdict = callback(user, &daqhdr, data);
                         if (verdict >= MAX_DAQ_VERDICT)
                             verdict = DAQ_VERDICT_PASS;
@@ -706,8 +710,7 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
                     instance->stats.packets_received++;
                     c++;
 send_packet:
-                    if (verdict == DAQ_VERDICT_PASS && instance->peer)
-                    {
+                    if (verdict == DAQ_VERDICT_PASS && instance->peer){
                         peer->bufs[peer->end] =bufs[i];
                         peer->end ++;
                     }else{
@@ -744,10 +747,9 @@ poll:
             gettimeofday(&now,NULL);
             if (now.tv_sec > ts.tv_sec ||(now.tv_usec - ts.tv_usec) > dpdkc->timeout * 1000)
                 return 0;
-            else{
-                gettimeofday(&ts,NULL);
+        }else{
+                gettimeofday(&ts,NULL);//slow down
             }
-        }
     }
 
     return 0;

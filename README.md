@@ -68,3 +68,31 @@ then continue the install.
 ```
 sudo snort --daq-dir /usr/local/lib/daq/ --daq dpdk --daq-var dpdk_args="-c 3" -i dpdk0:dpdk1 -c /usr/local/etc/snort/snort.lua
 ```
+
+
+---
+# Performance
+
+I have test the performance of this module by using inline mode.
+```
+snort --daq-dir /usr/local/lib/daq/ -Q --daq dpdk --daq-var dpdk_args="-c f" -i dpdk0:dpdk1 --bpf 'not ip' -z 5
+```
+
+I use Spirent Test Center to test the inline mode of Snort. Link two ports of the Test Center(called port0 and port1) and my server(called port2 and port3).
+port0 send packets to port2, and the snort will transmit the traffics from port3 to port1. The Test Center will show the rate and numbers of packets.
+Here shows my result.
+
+Speed(Gbps)|Packet reception rate(%)
+---|---
+4.46Gbps|100%
+5.00Gbps|99.908246%
+5.49Gbps|99.690055%
+5.97Gbps|99.436383%
+6.49Gbps|99.224725%
+6.98Gbps|99.046927%
+7.49Gpbs|98.879720%
+7.797Gbps|93.676544%
+8.41Gbps|87.221411%
+8.93Gbps|82.971818%
+9.49Gbps|78.175310%
+10.00Gbps|73.977586%
