@@ -95,4 +95,5 @@ Speed(Gbps)|Packet reception rate(%)
 8.41Gbps|100%
 8.93Gbps|100%
 9.49Gbps|100%
+9.74Gbps|100%
 10.00Gbps|99.9999%
