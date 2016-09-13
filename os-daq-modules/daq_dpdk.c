@@ -48,8 +48,8 @@
 #define nm_ring_empty(r)        ((r)->avail == 0)
 #endif
 */
-
-#define DEBUG 1
+//0 for close debug mode, 1 for open debug mode.
+#define DEBUG 0
 #if DEBUG 
 #define DBG(var, ...) printf(var, __VA_ARGS__)
 #else 
@@ -63,10 +63,8 @@ typedef struct _dpdk_instance
     int fd;
 #define NMINST_FWD_BLOCKED     0x1
 #define NMINST_TX_BLOCKED      0x2
-  //  uint32_t flags;
     int index;
     //NIC config
-    //uint16_t ring_size;
     uint16_t queue_size;
     uint16_t port;//the port id of nic.
     int start;
@@ -100,7 +98,6 @@ typedef struct _dpdk_context
     volatile int break_loop;
     DAQ_Stats_t stats;
     DAQ_State state;
-    //struct timeval tv;
     int promisc_flag;
     char errbuf[256];
 } DPDK_Context_t;
@@ -197,7 +194,6 @@ static DPDKInstance *create_instance(const char *device, DPDKInstance *parent, c
     }
 
     /* Initialize the instance, including an arbitrary and unique device index. */
-    //instance->mem = MAP_FAILED;
     instance->index = index;
     index++;
 
@@ -241,20 +237,7 @@ static int create_bridge(DPDK_Context_t *dpdkc, const int port1, const int port2
 static int start_instance(DPDK_Context_t *dpdkc, DPDKInstance *instance)
 {
     DBG("%s():%d.\n",__FUNCTION__,__LINE__);
-    /*
-    int idx = -1;
-    pthread_t tid = pthread_self();
-    for (int i =0;i<dpdkc->intf_count;i++ ){
-        if(tid == dpdkc->portMap[i]){
-            idx = i;
-            break;
-        }
-    }
-    if (idx == -1){
-        DPE(dpdkc->errbuf, "%s: Couldn't start device for thread %d\n", __FUNCTION__, tid);
-        return DAQ_ERROR;
-    }
-    instance = insMap[i];*/
+
     struct rte_mempool * mp = dpdkc->mp;
     int queue = instance -> queue_size;
     //instance -> queue_size = 4;
@@ -315,7 +298,6 @@ static int start_instance(DPDK_Context_t *dpdkc, DPDKInstance *instance)
 static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, char *errbuf, size_t errlen)
 {
     DPDK_Context_t *dpdkc;
-    //pthread_t jiffies_pid;
     DPDKInstance *instance;
     DAQ_Dict *entry;
     char intf[IFNAMSIZ];
@@ -525,7 +507,6 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     dpdkc->state = DAQ_STATE_INITIALIZED;
     *ctxt_ptr = dpdkc;
     local_ctx = dpdkc;
-    //pthread_create(&jiffies_pid, NULL, (void *)jiffies, dpdkc);
     isInit = 1;
     DBG("%s() in %d:unluck, T.\n",__FUNCTION__,__LINE__);
     pthread_mutex_unlock(&mutex);
