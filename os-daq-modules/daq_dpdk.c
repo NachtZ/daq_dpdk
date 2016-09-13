@@ -100,7 +100,8 @@ typedef struct _dpdk_context
     volatile int break_loop;
     DAQ_Stats_t stats;
     DAQ_State state;
-    
+    //struct timeval tv;
+    int promisc_flag;
     char errbuf[256];
 } DPDK_Context_t;
 DPDK_Context_t * local_ctx = NULL;
@@ -270,6 +271,9 @@ static int start_instance(DPDK_Context_t *dpdkc, DPDKInstance *instance)
 		.mq_mode = ETH_MQ_TX_NONE,
 	},
 	};
+    //static const struct rte_eth_conf port_conf = {
+    //.rxmode = { .max_rx_pkt_len = ETHER_MAX_LEN }
+    //};
     int port = instance -> port;
     if(port > rte_eth_dev_count()){
         DBG("%s():%d.\n",__FUNCTION__,__LINE__);
@@ -298,7 +302,8 @@ static int start_instance(DPDK_Context_t *dpdkc, DPDKInstance *instance)
         return DAQ_ERROR;
     }
     //here need to edit.
-    rte_eth_promiscuous_enable(port);
+    if(dpdkc->promisc_flag)
+        rte_eth_promiscuous_enable(port);//one slow point
     instance -> start = 0;
     instance -> end = 0;
     instance ->tx_num = 0;
@@ -306,10 +311,11 @@ static int start_instance(DPDK_Context_t *dpdkc, DPDKInstance *instance)
     return DAQ_SUCCESS;
 }
 
+
 static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, char *errbuf, size_t errlen)
 {
     DPDK_Context_t *dpdkc;
-
+    //pthread_t jiffies_pid;
     DPDKInstance *instance;
     DAQ_Dict *entry;
     char intf[IFNAMSIZ];
@@ -350,7 +356,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
         pthread_mutex_unlock(&mutex);
         return DAQ_SUCCESS;
     }
-    DBG("In NachtZ's 9.12 edition dpdk module of daq:%d.\n",count ++);
+    DBG("In NachtZ's 9.13 15:08 edition dpdk module of daq:%d.\n",count ++);
     dpdkc = calloc(1, sizeof(DPDK_Context_t));
     if (!dpdkc)
     {
@@ -369,6 +375,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
 
     dpdkc->snaplen = config->snaplen;
     dpdkc->timeout = (config->timeout > 0) ? (int) config->timeout : -1;
+    dpdkc->promisc_flag = (config->flags & DAQ_CFG_PROMISC);
     //here need to be edit.
     /*int argc = 3;
     char * argv[] = {"dpdk","-c","3"};
@@ -516,9 +523,9 @@ static int dpdk_daq_initialize(const DAQ_Config_t * config, void **ctxt_ptr, cha
     }
 
     dpdkc->state = DAQ_STATE_INITIALIZED;
-
     *ctxt_ptr = dpdkc;
     local_ctx = dpdkc;
+    //pthread_create(&jiffies_pid, NULL, (void *)jiffies, dpdkc);
     isInit = 1;
     DBG("%s() in %d:unluck, T.\n",__FUNCTION__,__LINE__);
     pthread_mutex_unlock(&mutex);
@@ -625,7 +632,7 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
     int ret, c = 0,queue;
     int burst_size;
     struct timeval ts;
-    struct rte_mbuf *bufs[BURST_SIZE];
+    struct rte_mbuf *bufs[BURST_SIZE];//one possible slow point
     while (c < cnt || cnt <= 0)
     {
         got_one = 0;
@@ -667,7 +674,7 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
                     goto send_packet;
                 }*/
             for(queue = 0;queue < instance -> queue_size;queue ++){
-                gettimeofday(&ts,NULL);//one slow point
+                gettimeofday(&ts,0);//one slow point
                 if(cnt <=0 || BURST_SIZE + c <= cnt){
                     burst_size = BURST_SIZE;
                 }else{
@@ -710,7 +717,7 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
                     instance->stats.packets_received++;
                     c++;
 send_packet:
-                    if (verdict == DAQ_VERDICT_PASS && instance->peer){
+                    if (verdict == DAQ_VERDICT_PASS && peer){
                         peer->bufs[peer->end] =bufs[i];
                         peer->end ++;
                     }else{
@@ -744,11 +751,11 @@ poll:
             struct timeval now;
             if(dpdkc->timeout == -1)
                 continue;
-            gettimeofday(&now,NULL);
+            gettimeofday(&now,0);
             if (now.tv_sec > ts.tv_sec ||(now.tv_usec - ts.tv_usec) > dpdkc->timeout * 1000)
                 return 0;
         }else{
-                gettimeofday(&ts,NULL);//slow down
+                gettimeofday(&ts,0);;//slow down
             }
     }
 
