@@ -53,7 +53,7 @@ $ make && sudo make install
 
 ## Snort
 The version now is `snort-3.0.0-a4-201`.
-You can install snort by following it's `README`.
+You can install snort by following it's [README](https://github.com/snortadmin/snort3/blob/master/README.md).
 Then after`./configure`.  
 edit it's `./src/Makefile`
 eidt line 620 to :
@@ -80,6 +80,17 @@ snort --daq-dir /usr/local/lib/daq/ -Q --daq dpdk --daq-var dpdk_args="-c f" -i 
 
 I use Spirent Test Center to test the inline mode of Snort. Link two ports of the Test Center(called port0 and port1) and my server(called port2 and port3).
 port0 send packets to port2, and the snort will transmit the traffics from port3 to port1. The Test Center will show the rate and numbers of packets.
+
+
+```
+ Spirent Port0   <-------------->   My Server Port2
+	  ↑                                  ↑
+	  |                                  |
+	  |                                  |
+	  ↓                                  ↓
+ Spirent Port1   <-------------->   My Server Port3
+```
+
 Here shows my result.
 
 Speed(Gbps)|Packet reception rate(%)
