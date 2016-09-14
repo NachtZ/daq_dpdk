@@ -68,11 +68,11 @@ then continue the install.
 ```
 sudo snort --daq-dir /usr/local/lib/daq/ --daq dpdk --daq-var dpdk_args="-c 1" -i dpdk0:dpdk1 -c /usr/local/etc/snort/snort.lua -z 2
 ```
-`--daq-dir` : the path of daq lib.
-`--daq dpdk`: tell snort to use dpdk module.
-`--daq-var dpdk_args="-c 1"`: the argument of dpdk. You have no need to edit it, if you want to use miti-trhead. you should use `-z` option.
-`-i dpdk0:dpdk1`: choose the interface of dpdk. Start from dpdk0.
-`-z 2`:max number of packet thread. One packet thread can only and must have one NIC.
+`--daq-dir` : the path of daq lib.  
+`--daq dpdk`: tell snort to use dpdk module.  
+`--daq-var dpdk_args="-c 1"`: the argument of dpdk. You have no need to edit it, if you want to use miti-trhead. you should use `-z` option.  
+`-i dpdk0:dpdk1`: choose the interface of dpdk. Start from dpdk0.  
+`-z 2`:max number of packet thread. One packet thread can only and must have one NIC.  
 
 ---
 # Performance
