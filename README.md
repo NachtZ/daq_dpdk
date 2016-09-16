@@ -3,7 +3,7 @@
 This is a project about dpdk module for daq.  
 The DAQ version is v2.1.0. You can visit [Snort.org](https://snort.org/downloads/#snort-3.0) to download the origin version about daq and snort++.  
 The daq module is overwrite from the module `daq_netmap.c`. And I also refer to [btw616's project](https://github.com/btw616/daq-dpdk) and [his mail](https://sourceforge.net/p/snort/mailman/message/35162409/) for how to use the new daq module in snort.  
-Now the project version is v0.6. Now it support multithreading. One thread can only get packets from one port. I will test this module after my summer vacation because I don't have another computer to generate big flow now.
+Now the project version is v1.0. Now it support multithreading. One thread can only get packets from one port. I have tested this module and got a good performance now.
 Now this module also has one problem. The dpdk args `-c` is still useless as the main controllor of thread is snort not daq. I'll try to slove this problem.
 You can read my [dev_note](./dev_note_zh.md) written in chinese.
 
@@ -66,9 +66,13 @@ then continue the install.
 ---
 # Usage
 ```
-sudo snort --daq-dir /usr/local/lib/daq/ --daq dpdk --daq-var dpdk_args="-c 3" -i dpdk0:dpdk1 -c /usr/local/etc/snort/snort.lua
+sudo snort --daq-dir /usr/local/lib/daq/ --daq dpdk --daq-var dpdk_args="-c 1" -i dpdk0:dpdk1 -c /usr/local/etc/snort/snort.lua -z 2
 ```
-
+`--daq-dir` : the path of daq lib.  
+`--daq dpdk`: tell snort to use dpdk module.  
+`--daq-var dpdk_args="-c 1"`: the argument of dpdk. You have no need to edit it, if you want to use miti-trhead. you should use `-z` option.  
+`-i dpdk0:dpdk1`: choose the interface of dpdk. Start from dpdk0.  
+`-z 2`:max number of packet thread. One packet thread can only and must have one NIC.  
 
 ---
 # Performance
