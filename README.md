@@ -116,3 +116,8 @@ Speed(Gbps)|Packet reception rate(%)
 9.49Gbps|100%
 9.74Gbps|100%
 10.00Gbps|99.9999%
+
+# WARNING
+Each packet thread will only receive packets from a single interface.  
+This means that Snort inspection will be generally ineffectual in an inline scenario as any given packet thread will only be looking at one direction of the traffic and be fairly confused when it comes to bidirectional protocols (say, TCP).
+So if you want to use in such cases, DO NOT use this module.
