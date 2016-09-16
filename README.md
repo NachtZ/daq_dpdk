@@ -120,4 +120,4 @@ Speed(Gbps)|Packet reception rate(%)
 # WARNING
 Each packet thread will only receive packets from a single interface.  
 This means that Snort inspection will be generally ineffectual in an inline scenario as any given packet thread will only be looking at one direction of the traffic and be fairly confused when it comes to bidirectional protocols (say, TCP).
-So if you want to use in such cases, DO NOT use this module.
+So if you want to use in such cases, **DO NOT** use this module.
