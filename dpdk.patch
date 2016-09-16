@@ -1,0 +1,12 @@
+diff -r -N -u dpdk-16.04-t/mk/exec-env/linuxapp/rte.vars.mk dpdk-16.04/mk/exec-env/linuxapp/rte.vars.mk
+--- dpdk-16.04-t/mk/exec-env/linuxapp/rte.vars.mk	2016-04-12 05:56:34.000000000 +0800
++++ dpdk-16.04/mk/exec-env/linuxapp/rte.vars.mk	2016-09-16 10:30:58.595388641 +0800
+@@ -41,6 +41,8 @@
+ #
+ ifeq ($(CONFIG_RTE_BUILD_SHARED_LIB),y)
+ EXECENV_CFLAGS  = -pthread -fPIC
++else ifeq ($(CONFIG_RTE_BUILD_FPIC),y)
++EXECENV_CFLAGS  = -pthread -fPIC
+ else
+ EXECENV_CFLAGS  = -pthread
+ endif

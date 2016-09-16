@@ -1,0 +1,12 @@
+diff -r -N -u snort-3.0.0-t/src/Makefile snort-3.0.0-a4/src/Makefile
+--- snort-3.0.0-t/src/Makefile	2016-09-16 10:26:30.701798174 +0800
++++ snort-3.0.0-a4/src/Makefile	2016-09-16 10:27:46.683967833 +0800
+@@ -617,7 +617,7 @@
+ 
+ snort$(EXEEXT): $(snort_OBJECTS) $(snort_DEPENDENCIES) $(EXTRA_snort_DEPENDENCIES) 
+ 	@rm -f snort$(EXEEXT)
+-	$(AM_V_CXXLD)$(snort_LINK) $(snort_OBJECTS) $(snort_LDADD) $(LIBS)
++	$(AM_V_CXXLD)$(snort_LINK) $(snort_OBJECTS) $(snort_LDADD) $(LIBS) -Wl,--whole-archive,-ldpdk,--no-whole-archive
+ 
+ mostlyclean-compile:
+ 	-rm -f *.$(OBJEXT)
