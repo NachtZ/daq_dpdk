@@ -14,6 +14,10 @@ You can read my [dev_note](./dev_note_zh.md) written in chinese.
 You can read [btw616's mail](https://sourceforge.net/p/snort/mailman/message/35162409/). He show the path in snort2.9.8,dpdk16.04 and daq2.0.6.
 
 The whole daq 2.1.0 has been pathed in the project. So you can download it.
+## Quick Install
+I have make three patch for [`DPDK-16.04`](./dpdk.patch), [`DAQ-2.1.0`](./daq.patch) and [`Snort-3.0.0-a4-201-auto`](./snort.patch).   
+If you have these packages already, you can patch them and following the install guide below.
+
 ## DPDK 
 The dpdk path is:
 ```
